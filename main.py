@@ -52,21 +52,29 @@ async def get_ai_response(user_id, text):
         except Exception as e:
             logging.warning(f"Google AI отказал (ошибка лимита или региона): {e}")
 
-    # 2. Резервный вариант: OpenRouter
+# 2. Резервный вариант: OpenRouter
     if OPENROUTER_API_KEY:
         try:
             logging.info(f"Переключение на OpenRouter для {user_id}")
             async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(
                     "https://openrouter.ai/api/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+                    headers={
+                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                        "HTTP-Referer": "https://render.com", # Обязательно для OpenRouter
+                        "X-Title": "MyTelegramBot"
+                    },
                     json={
-                        "model": "google/gemini-2.0-flash-exp:free",
+                        # Попробуем другую супер-стабильную бесплатную модель
+                        "model": "mistralai/mistral-7b-instruct:free", 
                         "messages": [{"role": "user", "content": full_prompt}]
                     }
                 )
                 result = resp.json()
-                return result['choices'][0]['message']['content']
+                if 'choices' in result:
+                    return result['choices'][0]['message']['content']
+                else:
+                    logging.error(f"OpenRouter Error Detail: {result}")
         except Exception as e:
             logging.error(f"Ошибка OpenRouter: {e}")
     
