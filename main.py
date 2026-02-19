@@ -46,7 +46,7 @@ async def handle(message: types.Message):
                     "HTTP-Referer": "https://render.com",
                 },
                 json={
-                    "model": "google/gemini-2.0-flash-001", 
+                    "model": "google/gemini-2.0-flash-001:free", 
                     "messages": [
                         {
                             "role": "system", 
