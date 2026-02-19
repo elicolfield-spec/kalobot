@@ -1,122 +1,112 @@
 import os
-import asyncio
 import logging
+import asyncio
 import httpx
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from google import genai
-from aiohttp import web
+from google.genai import types as genai_types
 
+# Настройка логирования
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Загрузка ключей
+# Инициализация токенов из переменных окружения
 TG_TOKEN = os.getenv("TG_TOKEN")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
+# Инициализация ботов и клиентов
 bot = Bot(token=TG_TOKEN)
 dp = Dispatcher()
-google_client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
+google_client = genai.Client(api_key=GOOGLE_API_KEY)
 
-# Память: {user_id: [история]}
+# Хранилище контекста (память на 6 сообщений)
 user_history = {}
 
-# --- ВЕБ-СЕРВЕР ДЛЯ RENDER ---
-async def handle(request):
-    return web.Response(text="Bot is running!")
-
-async def start_webserver():
-    app = web.Application()
-    app.router.add_get("/", handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get("PORT", 10000))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-
-# --- ФУНКЦИЯ ЗАПРОСА К ИИ (С ПЕРЕКЛЮЧЕНИЕМ) ---
 async def get_ai_response(user_id, text):
+    # Собираем контекст
     history = user_history.get(user_id, [])
-    # Ограничиваем историю для экономии места
     context = "\n".join(history[-6:])
     full_prompt = f"{context}\nUser: {text}\nAI:"
 
-    # 1. Пробуем Google AI (если ключ есть)
-    if google_client:
-        try:
-            logging.info(f"Попытка запроса к Google AI для {user_id}")
-            response = google_client.models.generate_content(
-                model="gemini-2.0-flash", contents=full_prompt
-            )
+    # --- План А: Прямой Google AI ---
+    try:
+        logger.info(f"Попытка Google AI для {user_id}")
+        response = google_client.models.generate_content(
+            model="gemini-2.0-flash", 
+            contents=full_prompt
+        )
+        if response.text:
             return response.text
-        except Exception as e:
-            logging.warning(f"Google AI отказал (ошибка лимита или региона): {e}")
+    except Exception as e:
+        logger.warning(f"Google AI отказал (лимит/регион). Переходим к OpenRouter...")
 
-# 2. Резервный вариант: OpenRouter
+    # --- План Б: Перебор моделей в OpenRouter ---
+    models_to_try = [
+        "google/gemini-2.0-flash-exp:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "deepseek/deepseek-chat:free"
+    ]
+
     if OPENROUTER_API_KEY:
-        try:
-            logging.info(f"Переключение на OpenRouter для {user_id}")
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                        "HTTP-Referer": "https://render.com",
-                    },
-                    json={
-                        # Используем самую актуальную бесплатную модель
-                        "model": "google/gemini-2.0-flash-exp:free", 
-                        "messages": [{"role": "user", "content": full_prompt}]
-                    }
-                )
-                result = resp.json()
-                
-                # Если Gemini:free тоже недоступен, пробуем универсальный Llama
-                if 'error' in result:
-                    logging.warning("Gemini на OpenRouter недоступен, пробую Llama...")
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for model_name in models_to_try:
+                try:
+                    logger.info(f"Пробую модель {model_name} через OpenRouter...")
                     resp = await client.post(
                         "https://openrouter.ai/api/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+                        headers={
+                            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                            "HTTP-Referer": "https://render.com",
+                            "X-Title": "Kalobot"
+                        },
                         json={
-                            "model": "meta-llama/llama-3.3-70b-instruct:free",
+                            "model": model_name,
                             "messages": [{"role": "user", "content": full_prompt}]
                         }
                     )
-                    result = resp.json()
+                    
+                    if resp.status_code == 200:
+                        result = resp.json()
+                        if 'choices' in result and len(result['choices']) > 0:
+                            return result['choices'][0]['message']['content']
+                    
+                    logger.error(f"Модель {model_name} вернула статус {resp.status_code}")
+                    await asyncio.sleep(1) # Короткая пауза перед следующей попыткой
+                except Exception as e:
+                    logger.error(f"Ошибка при обращении к {model_name}: {e}")
+                    continue
 
-                return result['choices'][0]['message']['content']
-        except Exception as e:
-            logging.error(f"Ошибка OpenRouter: {e}")
-    
-    return "Извини, все мои нейронные связи сейчас заняты. Попробуй позже!"
+    return "Извини, все мои нейронные связи сейчас заняты (ошибка лимитов). Попробуй написать чуть позже!"
 
-# --- ОБРАБОТЧИКИ ---
 @dp.message(Command("start"))
-async def start_cmd(message: types.Message):
+async def start_command(message: types.Message):
     user_history[message.from_user.id] = []
-    await message.answer("Привет! Я финальная версия твоего бота. Я использую Google AI, а если он устанет — переключусь на резервный канал. О чем поболтаем?")
+    await message.answer("Привет! Я твой ИИ-бот. Я готов общаться, даже если основные лимиты Google на пределе. Что обсудим?")
 
 @dp.message()
-async def chat_handler(message: types.Message):
-    if not message.text: return
-    
+async def handle_message(message: types.Message):
     user_id = message.from_user.id
-    # Показываем статус "печатает"
-    await bot.send_chat_action(chat_id=message.chat.id, action="typing")
-    
-    answer = await get_ai_response(user_id, message.text)
-    
-    # Сохраняем в историю
-    if user_id not in user_history: user_history[user_id] = []
-    user_history[user_id].append(f"User: {message.text}")
-    user_history[user_id].append(f"AI: {answer}")
-    
-    # Ограничиваем длину ответа для Telegram
-    if len(answer) > 4000: answer = answer[:4000] + "..."
-    await message.answer(answer)
+    user_text = message.text
+
+    # Отправляем статус "печатает"
+    await bot.send_chat_action(message.chat.id, "typing")
+
+    # Получаем ответ от ИИ
+    response_text = await get_ai_response(user_id, user_text)
+
+    # Обновляем историю (для памяти)
+    if user_id not in user_history:
+        user_history[user_id] = []
+    user_history[user_id].append(f"User: {user_text}")
+    user_history[user_id].append(f"AI: {response_text}")
+
+    # Отвечаем пользователю
+    await message.answer(response_text)
 
 async def main():
-    await start_webserver()
+    logger.info("Бот запущен и готов к работе...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
