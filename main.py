@@ -28,7 +28,7 @@ async def get_ai_response(text):
                 "HTTP-Referer": "https://huggingface.co/spaces", 
             },
             json={
-                "model": "google/gemini-2.0-flash-exp:free", # Та самая бесплатная модель
+                "model": "openrouter/auto", # Та самая бесплатная модель
                 "messages": [{"role": "user", "content": text}]
             },
             timeout=60.0
