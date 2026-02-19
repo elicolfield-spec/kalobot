@@ -3,24 +3,37 @@ import asyncio
 import httpx
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiohttp import web
 
-# Всё самое необходимое
+# Инициализация
 bot = Bot(token=os.getenv("TG_TOKEN"))
 dp = Dispatcher()
 
+# --- ТЕ САМЫЕ СТРОЧКИ ДЛЯ RENDER ---
+async def handle_healthcheck(request):
+    return web.Response(text="OK")
+
+async def run_healthcheck():
+    app = web.Application()
+    app.router.add_get("/", handle_healthcheck)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Берем порт, который дает Render, или 8080 по умолчанию
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+# ----------------------------------
+
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("Привет! Я твой самый первый бот. Теперь я снова простой и рабочий!")
+    await message.answer("Бот официально запущен и подтвержден системой Render! ✅")
 
 @dp.message()
 async def handle(message: types.Message):
-    # Прямой и простой запрос к нейронке
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
-            },
+            headers={"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}"},
             json={
                 "model": "google/gemini-2.0-flash-001", 
                 "messages": [{"role": "user", "content": message.text}]
@@ -31,7 +44,9 @@ async def handle(message: types.Message):
         await message.answer(text)
 
 async def main():
-    # Удаляем вебхук, чтобы не было конфликта при перезапуске
+    # Запускаем проверку порта в фоновом режиме
+    asyncio.create_task(run_healthcheck())
+    
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
