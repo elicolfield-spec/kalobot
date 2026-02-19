@@ -12,29 +12,19 @@ logging.basicConfig(level=logging.INFO)
 TG_TOKEN = os.getenv("TG_TOKEN")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
+# Проверка ключа перед запуском, чтобы не было ValueError
+if not GOOGLE_API_KEY:
+    raise ValueError("ОШИБКА: Переменная GOOGLE_API_KEY не найдена в настройках Render!")
+
 bot = Bot(token=TG_TOKEN)
 dp = Dispatcher()
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
-# --- СИСТЕМА ПАМЯТИ ---
-# Храним историю в виде: {user_id: [список сообщений]}
+# Хранилище памяти: {user_id: [список сообщений]}
 user_history = {}
 
-def get_history(user_id):
-    if user_id not in user_history:
-        user_history[user_id] = []
-    return user_history[user_id]
-
-def add_to_history(user_id, role, text):
-    history = get_history(user_id)
-    history.append({"role": role, "content": text})
-    # Храним только последние 20 сообщений, чтобы не перегружать память
-    if len(history) > 20:
-        user_history[user_id] = history[-20:]
-# -----------------------
-
 async def handle(request):
-    return web.Response(text="Bot is alive with memory!")
+    return web.Response(text="Bot is active!")
 
 async def start_webserver():
     app = web.Application()
@@ -47,39 +37,43 @@ async def start_webserver():
 
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
-    user_id = message.from_user.id
-    user_history[user_id] = [] # Сброс памяти при команде /start
-    await message.answer("Привет! Я тебя запомнил. О чем пообщаемся?")
+    user_history[message.from_user.id] = []
+    await message.answer("Привет! Я — ИИ с памятью. Я буду помнить наш диалог, пока меня не перезагрузят.")
 
 @dp.message()
 async def chat(message: types.Message):
     if not message.text: return
     
     user_id = message.from_user.id
-    history = get_history(user_id)
     
-    # Добавляем сообщение пользователя в его историю
-    # Для Google SDK формат может чуть отличаться, адаптируем под текст:
-    prompt = ""
-    for entry in history:
-        prompt += f"{entry['role']}: {entry['content']}\n"
-    prompt += f"user: {message.text}"
+    # Получаем или создаем историю
+    if user_id not in user_history:
+        user_history[user_id] = []
+    
+    # Ограничиваем историю 10 последними фразами, чтобы сообщение не было слишком длинным
+    context = "\n".join(user_history[user_id][-10:])
+    full_prompt = f"{context}\nUser: {message.text}\nAI:"
 
     try:
         response = client.models.generate_content(
             model="gemini-2.0-flash",
-            contents=prompt
+            contents=full_prompt
         )
         answer = response.text
         
-        # Сохраняем диалог
-        add_to_history(user_id, "user", message.text)
-        add_to_history(user_id, "model", answer)
+        # Сохраняем в память только короткие выжимки
+        user_history[user_id].append(f"User: {message.text}")
+        user_history[user_id].append(f"AI: {answer}")
         
+        # Если ответ слишком длинный для Telegram, обрезаем его (на всякий случай)
+        if len(answer) > 4000:
+            answer = answer[:4000] + "..."
+            
         await message.answer(answer)
+        
     except Exception as e:
         logging.error(f"Ошибка: {e}")
-        await message.answer("Произошла ошибка. Попробуй еще раз.")
+        await message.answer("Упс, возникла ошибка. Попробуй сократить вопрос.")
 
 async def main():
     await start_webserver()
