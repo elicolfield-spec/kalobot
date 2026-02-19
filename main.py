@@ -61,20 +61,30 @@ async def get_ai_response(user_id, text):
                     "https://openrouter.ai/api/v1/chat/completions",
                     headers={
                         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                        "HTTP-Referer": "https://render.com", # Обязательно для OpenRouter
-                        "X-Title": "MyTelegramBot"
+                        "HTTP-Referer": "https://render.com",
                     },
                     json={
-                        # Попробуем другую супер-стабильную бесплатную модель
-                        "model": "mistralai/mistral-7b-instruct:free", 
+                        # Используем самую актуальную бесплатную модель
+                        "model": "google/gemini-2.0-flash-exp:free", 
                         "messages": [{"role": "user", "content": full_prompt}]
                     }
                 )
                 result = resp.json()
-                if 'choices' in result:
-                    return result['choices'][0]['message']['content']
-                else:
-                    logging.error(f"OpenRouter Error Detail: {result}")
+                
+                # Если Gemini:free тоже недоступен, пробуем универсальный Llama
+                if 'error' in result:
+                    logging.warning("Gemini на OpenRouter недоступен, пробую Llama...")
+                    resp = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+                        json={
+                            "model": "meta-llama/llama-3.3-70b-instruct:free",
+                            "messages": [{"role": "user", "content": full_prompt}]
+                        }
+                    )
+                    result = resp.json()
+
+                return result['choices'][0]['message']['content']
         except Exception as e:
             logging.error(f"Ошибка OpenRouter: {e}")
     
