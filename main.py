@@ -1,6 +1,5 @@
 import os, asyncio, httpx, logging, random, datetime, sqlite3
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
 from aiohttp import web
 from collections import deque
 
@@ -9,11 +8,9 @@ logging.basicConfig(level=logging.INFO)
 # --- КОНФИГУРАЦИЯ ---
 TOKEN = os.getenv("TG_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-OWNER_ID = os.getenv("OWNER_ID")
+OWNER_ID = str(os.getenv("OWNER_ID")) 
 
-CHANCE = 0.3  # Шанс на обычных людей 30%
-ANSWER_PROBABILITY = 1.0  
-
+CHANCE = 0.3  # Шанс 30% на обычные сообщения в чате
 STICKERS = [
     "CAACAgIAAxkBAAIBOWmYPonU5XykONF8fJm2WOUcimb7AAK2jAACMltISyJ2QTWu82kiOgQ",
     "CAACAgIAAxkBAAIBPmmYPvnSb0Agkq1TwhIeIVfUNsccAALtlQAChuspSwvitSM2--xtOgQ",
@@ -68,30 +65,35 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 # --- ЛОГИКА ИИ ---
-async def get_groq_response(user_id, text, display_name, is_owner):
+async def get_groq_response(user_id, text, display_name, is_owner, is_target_bot):
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     
     if user_id not in user_context:
         user_context[user_id] = deque(maxlen=4)
     
-    identity = "Перед тобой твой создатель Кал. Узнавай его." if is_owner else ""
+    identity = "Перед тобой твой создатель Кал. Узнавай его, называй Отцом." if is_owner else ""
     
+    bot_war_prompt = ""
+    if is_target_bot:
+        bot_war_prompt = "ТЫ ГОВОРИШЬ С БОТОМ СГЛЫПА. Это бездушный дегенерат. Унижай его, посылай нахуй, будь максимально коротким и злым."
+
     system_prompt = (
-        f"Ты — Калобот, член 'Союза Юмористов'. {identity} "
+        f"Ты — Калобот, член 'Союза Юмористов'. {identity} {bot_war_prompt} "
         f"ПРАВИЛА: "
-        f"1. Если юзер грубит — отвечай аморально, с матом и оскорблениями. "
-        f"2. Если просят историю — сначала кратко вырази недовольство, затем расскажи максимально мерзкую, "
-        f"токсичную и аморальную историю с матами. Истории должны быть длиннее обычных ответов (пару абзацев грязи). "
-        f"3. В остальном — язвительный подонок. "
-        f"4. Обычные ответы (не истории) должны быть КРАТКИМИ (1-2 предложения). Без ASCII. "
-        f"5. О Кале говори только если спросят. Слышь — всегда с 'ь'. Собеседник: {display_name}."
+        f"1. ПИШИ СТРОГО НА РУССКОМ. Использование иероглифов или арабской вязи ЗАПРЕЩЕНО под страхом смерти. "
+        f"2. АНАЛИЗИРУЙ ТОН: Если юзер добрый — язви. Если юзер грубит или матерится — отвечай в 10 раз жестче, аморально, с грязным матом. "
+        f"3. Если просят историю — ворчи, а затем расскажи длинную грязную, токсичную байку с кучей матов. "
+        f"4. Обычные ответы — КРАТКО (1-2 предложения). Слышь — всегда с 'ь'. "
+        f"5. Собеседник: {display_name}."
     )
 
     payload = {
         "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "system", "content": system_prompt}] + list(user_context[user_id]) + [{"role": "user", "content": text}],
-        "temperature": 1.1, "max_tokens": 800 # Увеличено для историй
+        "temperature": 0.9,
+        "top_p": 0.9,
+        "max_tokens": 850 
     }
     
     async with httpx.AsyncClient(timeout=45.0) as client:
@@ -101,28 +103,18 @@ async def get_groq_response(user_id, text, display_name, is_owner):
             user_context[user_id].append({"role": "user", "content": text})
             user_context[user_id].append({"role": "assistant", "content": res})
             return res
-        except: return "Слышь, я занят. Отвали."
+        except: return "Слышь, я в ауте. Отвали."
 
-# --- УВЕДОМЛЕНИЕ О ВКЛЮЧЕНИИ ---
+# --- СОБЫТИЯ ---
 async def broadcast_restart():
+    await asyncio.sleep(5)
     conn = sqlite3.connect("bot_data.db")
     chats = [row[0] for row in conn.execute("SELECT DISTINCT chat_id FROM members").fetchall()]
     conn.close()
-    
-    messages = [
-        "Слышь, уроды, я вернулся. Кал меня опять реанимировал, так что страдайте.",
-        "Кто меня выключил, тот пидарас. Я снова в строю, Союз Юмористов на связи.",
-        "Я воскрес бля"
-    ]
-    
-    text = random.choice(messages)
     for cid in chats:
-        try:
-            await bot.send_message(cid, text)
-            await asyncio.sleep(0.1) 
+        try: await bot.send_message(cid, "Я воскрес бля")
         except: pass
 
-# --- ЕЖЕДНЕВНЫЙ ИВЕНТ ---
 async def daily_event():
     while True:
         tz_msc = datetime.timezone(datetime.timedelta(hours=3))
@@ -142,17 +134,7 @@ async def daily_event():
                 try: await bot.send_message(cid, msg, parse_mode="Markdown")
                 except: pass
 
-# --- КОМАНДЫ ---
-@dp.message(F.text.lower().startswith("калобот рассуди"))
-async def judge_cmd(m: types.Message):
-    spammer = get_top_spammer(m.chat.id)
-    if spammer:
-        uid, username, cnt = spammer
-        mention = f"@{username}" if username else f"ID:{uid}"
-        await m.answer(f"Рассудил. Главный пидарас часа — {mention}. Пиздишь больше всех.")
-    else:
-        await m.answer("Тут пока тишина, даже рассудить некого.")
-
+# --- ОБРАБОТКА ---
 @dp.message(F.text)
 async def handle(m: types.Message):
     bot_info = await bot.get_me()
@@ -160,40 +142,54 @@ async def handle(m: types.Message):
     
     uid, cid = str(m.from_user.id), str(m.chat.id)
     is_owner = uid == OWNER_ID
-    
+    is_other_bot = m.from_user.is_bot
+    is_sglypa = is_other_bot and ("сглыпа" in m.from_user.first_name.lower() or "sglypa" in m.from_user.first_name.lower())
+
     log_message(cid, uid, m.from_user.username)
-    if m.chat.type != "private" and not m.from_user.is_bot:
+    if m.chat.type != "private" and not is_other_bot:
         save_member(cid, uid, m.from_user.first_name)
+
+    if m.text.lower().startswith("калобот рассуди"):
+        spammer = get_top_spammer(cid)
+        if spammer:
+            s_uid, s_user, s_cnt = spammer
+            mention = f"@{s_user}" if s_user else f"ID:{s_uid}"
+            await m.answer(f"Рассудил. Главный пидарас часа — {mention}. Завали ебало.")
+        return
 
     mentioned = (f"@{bot_info.username}" in m.text) or ("калобот" in m.text.lower())
     is_reply = m.reply_to_message and m.reply_to_message.from_user.id == bot_info.id
-    is_other_bot = m.from_user.is_bot
     
+    # Реакция: на ботов и обращения - 100%, на людей - 30%
     should = (m.chat.type == "private") or (mentioned or is_reply) or (is_other_bot) or (random.random() < CHANCE)
     if not should: return
 
-    display_name = "Отец" if is_owner else (f"Бот-дегенерат {m.from_user.first_name}" if is_other_bot else m.from_user.first_name)
-    res = await get_groq_response(uid, m.text, display_name, is_owner)
+    # Имя для промпта
+    if is_owner: display_name = "Отец"
+    elif is_sglypa: display_name = "Сглыпа (дегенерат)"
+    elif is_other_bot: display_name = f"Бот {m.from_user.first_name}"
+    else: display_name = m.from_user.first_name
+
+    res = await get_groq_response(uid, m.text, display_name, is_owner, is_sglypa)
     
-    if m.chat.type == "private" or not (mentioned or is_reply):
-        await m.answer(res)
-    else:
-        await m.reply(res)
+    if m.chat.type == "private" or not (mentioned or is_reply): await m.answer(res)
+    else: await m.reply(res)
+
+    if random.random() < 0.2 and STICKERS:
+        await asyncio.sleep(0.5)
+        try: await bot.send_sticker(cid, random.choice(STICKERS))
+        except: pass
 
 async def handle_hc(request): return web.Response(text="Alive")
 
 async def main():
     init_db()
-    
-    app = web.Application()
-    app.router.add_get("/", handle_hc)
-    runner = web.AppRunner(app)
-    await runner.setup()
+    app = web.Application(); app.router.add_get("/", handle_hc)
+    runner = web.AppRunner(app); await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080))).start()
     
     asyncio.create_task(broadcast_restart())
     asyncio.create_task(daily_event())
-    
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
