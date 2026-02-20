@@ -8,9 +8,9 @@ from aiohttp import web
 
 logging.basicConfig(level=logging.INFO)
 
+# --- КОНФИГУРАЦИЯ ---
 TOKEN = os.getenv("TG_TOKEN")
 OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
-GROUP_ID = -100XXXXXXXXXX  # Твой ID группы
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -28,7 +28,7 @@ SYSTEM_PROMPT = (
 )
 
 async def get_ai_response(user_text):
-    """Пробует получить ответ от моделей по очереди, если одна выдает ошибку."""
+    """Пробует получить ответ от моделей по очереди."""
     async with httpx.AsyncClient(timeout=30.0) as client:
         for model_name in MODELS:
             try:
@@ -49,13 +49,11 @@ async def get_ai_response(user_text):
                 data = response.json()
                 if 'choices' in data and data['choices'][0]['message']['content']:
                     return data['choices'][0]['message']['content']
-                else:
-                    logging.warning(f"Модель {model_name} вернула пустой ответ. Пробую следующую...")
             except Exception as e:
                 logging.error(f"Ошибка модели {model_name}: {e}")
                 continue
         
-        return "Даже все мои запасные процессоры сгорели от твоей тупости. Ошибка API у всех моделей."
+        return "Даже мои запасные чипы сгорели от твоей тупости. Ошибка API."
 
 # --- ОБРАБОТЧИКИ ---
 
@@ -65,26 +63,15 @@ async def start(message: types.Message):
 
 @dp.message()
 async def handle(message: types.Message):
-    # Бот отвечает на любое сообщение
+    # Бот отвечает на любое сообщение в личке
     response_text = await get_ai_response(message.text)
     await message.answer(response_text)
 
-# --- ТАЙМЕР РАССЫЛКИ ---
-async def hourly_insult_loop():
-    while True:
-        await asyncio.sleep(3600)
-        text = await get_ai_response("Выдай случайное оскорбление для группы дегенератов.")
-        try:
-            await bot.send_message(GROUP_ID, text)
-        except Exception as e:
-            logging.error(f"Ошибка рассылки: {e}")
-
-# --- ЗАПУСК ---
+# --- СЕРВЕР ДЛЯ RENDER ---
 async def handle_healthcheck(request):
     return web.Response(text="I'm alive.")
 
 async def main():
-    # Healthcheck для Render
     app = web.Application()
     app.router.add_get("/", handle_healthcheck)
     runner = web.AppRunner(app)
@@ -92,7 +79,6 @@ async def main():
     site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
     await site.start()
 
-    asyncio.create_task(hourly_insult_loop())
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
