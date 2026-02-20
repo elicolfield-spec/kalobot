@@ -38,8 +38,9 @@ async def get_groq_response(user_id, text, display_name):
         f"Собеседник: {display_name}."
     )
 
+    # ОБНОВЛЕННЫЙ ID МОДЕЛИ (заменил 3.3-versatile на 3.3-specdec)
     payload = {
-        "model": "llama-3.3-70b-versatile",
+        "model": "llama-3.3-70b-specdec", 
         "messages": [
             {"role": "system", "content": system_prompt},
             *list(user_context[user_id]),
@@ -54,7 +55,6 @@ async def get_groq_response(user_id, text, display_name):
         try:
             r = await client.post(url, headers=headers, json=payload)
             
-            # Обработка лимитов (ошибка 429)
             if r.status_code == 429:
                 return "Слышь, лимиты кончились! Завалите ебальники на минуту, дайте мне выдохнуть."
             
@@ -92,7 +92,6 @@ async def handle(m: types.Message):
             else:
                 await m.reply(res)
                 
-            # Стикер отправляем только если это не сообщение об ошибке лимита
             if "лимиты кончились" not in res and random.random() < 0.15:
                 await bot.send_sticker(m.chat.id, random.choice(STICKERS))
         except: pass
