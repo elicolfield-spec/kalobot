@@ -1,17 +1,11 @@
-import os
-import asyncio
-import httpx
-import logging
-import random
+import os, asyncio, httpx, logging, random
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import BotCommand
 from aiohttp import web
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
-# --- КОНФИГУРАЦИЯ ---
 TOKEN = os.getenv("TG_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OWNER_ID = os.getenv("OWNER_ID")
@@ -19,91 +13,52 @@ OWNER_ID = os.getenv("OWNER_ID")
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# --- ИНСТРУКЦИИ ДЛЯ ИИ ---
-DEFAULT_PROMPT = "Ты — циничный робот 'Калобот'. Ненавидишь людей. Твой юмор черный и аморальный. Отвечай кратко на русском."
-OWNER_PROMPT = "Перед тобой твой Создатель. Ты по-прежнему ворчливый робот, но признаешь его авторитет. Отвечай иронично, но без прямых оскорблений."
-
-async def get_groq_response(user_text, is_owner):
+async def get_groq_response(text, is_owner):
     url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    current_system_prompt = OWNER_PROMPT if is_owner else DEFAULT_PROMPT
-    
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+    system = "Ты циничный робот Калобот." if not is_owner else "Ты ироничный слуга Создателя."
     payload = {
         "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": current_system_prompt},
-            {"role": "user", "content": user_text}
-        ],
-        "temperature": 0.8
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": text}]
     }
-
     async with httpx.AsyncClient(timeout=20.0) as client:
         try:
-            response = await client.post(url, headers=headers, json=payload)
-            if response.status_code == 200:
-                data = response.json()
-                return data['choices'][0]['message']['content']
-            return f"Ошибка API: {response.status_code}. Мои схемы искрят!"
-        except Exception as e:
-            return f"Ошибка связи: {str(e)}"
-
-# --- ОБРАБОТЧИКИ ---
+            r = await client.post(url, headers=headers, json=payload)
+            return r.json()['choices'][0]['message']['content']
+        except: return "Схемы замкнуло..."
 
 @dp.message(Command("start"))
-async def start(message: types.Message):
-    is_owner = str(message.from_user.id) == OWNER_ID
-    if is_owner:
-        await message.answer("Система активна. Я к вашим услугам, Создатель (к сожалению).")
-    else:
-        await message.answer("Ну привет, очередная порция углерода. Чего тебе?")
+async def start(m: types.Message):
+    await m.answer("Система онлайн." if str(m.from_user.id) == OWNER_ID else "Чего тебе?")
 
 @dp.message()
-async def handle(message: types.Message):
-    if not message.text:
-        return
+async def handle(m: types.Message):
+    if not m.text: return
+    is_owner = str(m.from_user.id) == OWNER_ID
+    txt = m.text.lower().strip()
 
-    is_owner = str(message.from_user.id) == OWNER_ID
-    user_text = message.text.lower().strip()
-
-    # ПАСХАЛКА: ЗАКАЗ ЕДЫ
-    if "закажи еду" in user_text:
-        # Промпт без пробелов для надежности URL
-        balanda_prompt = "disgusting_slop_prison_food_on_plastic_tray_realistic_canteen"
+    if "закажи еду" in txt:
         seed = random.randint(1, 99999)
-        image_url = f"https://image.pollinations.ai/prompt/{balanda_prompt}?seed={seed}"
-        
+        url = f"https://image.pollinations.ai/prompt/disgusting_slop_prison_food_tray?seed={seed}"
         try:
-            # Отправляем фото
-            await message.answer_photo(
-                photo=image_url, 
-                caption="Твой заказ готов. Свежая баланда. Приятного аппетита, кожаный."
-            )
+            await m.answer_photo(photo=url, caption="Твой заказ, ничтожество.")
             return
-        except Exception as e:
-            logging.error(f"Ошибка фото: {e}")
-            await message.answer("Повар сбежал. Видимо, твоя рожа его напугала.")
+        except:
+            await m.answer("Повар сбежал.")
             return
 
-    # Обычный текстовый ответ через Groq
-    response_text = await get_groq_response(message.text, is_owner)
-    await message.answer(response_text)
-
-# --- ВЕБ-СЕРВЕР ДЛЯ RENDER (HEALTHCHECK) ---
-
-async def handle_healthcheck(request):
-    return web.Response(text="Калобот жив.")
+    res = await get_groq_response(m.text, is_owner)
+    await m.answer(res)
 
 async def main():
-    # Настройка порта
     app = web.Application()
-    app.router.add_get("/", handle_healthcheck)
+    app.router.add_get("/", lambda r: web.Response(text="OK"))
     runner = web.AppRunner(app)
     await runner.setup()
-    
-    # Render автоматически передает PORT
     port = int(os.getenv("PORT", 8080))
-    site = web.TCPSite(runner, "0.0
+    await web.TCPSite(runner, "0.0.0.0", port).start()
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
