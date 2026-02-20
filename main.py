@@ -13,7 +13,11 @@ OWNER_ID = os.getenv("OWNER_ID")
 
 # Сюда вставляй полученные ID (через запятую в кавычках)
 STICKERS = [
-    "CAACAgIAAxkBAAEL_ZpmG..." 
+    "CAACAgIAAxkBAAIBOWmYPonU5XykONF8fJm2WOUcimb7AAK2jAACMltISyJ2QTWu82kiOgQ",
+    "CAACAgIAAxkBAAIBPmmYPvnSb0Agkq1TwhIeIVfUNsccAALtlQAChuspSwvitSM2--xtOgQ",
+    "CAACAgIAAxkBAAIBQGmYP59EO4k07mW28Y45SI06qw_5AAJoFgACJPrwSXaDUfo1vdVJOgQ",
+    "CAACAgEAAxkBAAIBRWmYQCExRztlJkqS1rjhf1zVTeDZAAIrBQACJY-IR7Nz7LV3B8aGOgQ",
+    "CAACAgIAAxkBAAIBR2mYQMGmWvXDCcDLvaXQItYIbdsoAALhMAACuSrZSw_MwzuLrYyLOgQ",
 ]
 
 UNKNOWN_ALIASES = ["чел", "тип", "тело", "умник", "персонаж"]
