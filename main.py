@@ -41,18 +41,18 @@ async def get_groq_response(user_id, text, display_name):
         f"Собеседник: {display_name}."
     )
 
-    # Собираем историю правильно
-    messages = [{"role": "system", "content": system_prompt}]
-    for msg in user_context[user_id]:
-        messages.append(msg)
-    messages.append({"role": "user", "content": text})
-
+    # Ставим модель, которая пришла на замену списанным
+    # Это либо llama-3.3-70b-versatile (если они ее починили), 
+    # либо llama3-70b-8192 (классика). Попробуем классику, она вечна.
     payload = {
-        "model": "llama-3.1-70b-versatile", # Самая стабильная версия 70B на сегодня
-        "messages": messages,
+        "model": "llama3-70b-8192", 
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            *list(user_context[user_id]),
+            {"role": "user", "content": text}
+        ],
         "temperature": 1.0,
-        "max_tokens": 512,
-        "top_p": 1.0 # Убрал 0.9 для стандарта
+        "max_tokens": 512
     }
     
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -72,7 +72,7 @@ async def get_groq_response(user_id, text, display_name):
             user_context[user_id].append({"role": "assistant", "content": res})
             return res
         except Exception as e:
-            logger.error(f"Ошибка: {e}")
+            logger.error(f"Ошибка запроса: {e}")
             return None
 
 @dp.message(F.text)
