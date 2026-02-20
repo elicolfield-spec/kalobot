@@ -38,23 +38,26 @@ async def get_groq_response(user_id, text, display_name):
         f"Собеседник: {display_name}."
     )
 
-    # Старый надежный метод сборки сообщений
-    messages = [{"role": "system", "content": system_prompt}]
-    for m in user_context[user_id]:
-        messages.append(m)
-    messages.append({"role": "user", "content": text})
-
     payload = {
-        "model": "llama-3-8b-instant",
-        "messages": messages,
+        "model": "llama-3.3-70b-versatile",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            *list(user_context[user_id]),
+            {"role": "user", "content": text}
+        ],
         "temperature": 1.0,
         "top_p": 0.9,
-        "max_tokens": 500
+        "max_tokens": 512
     }
     
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(timeout=25.0) as client:
         try:
             r = await client.post(url, headers=headers, json=payload)
+            
+            # Обработка лимитов (ошибка 429)
+            if r.status_code == 429:
+                return "Слышь, лимиты кончились! Завалите ебальники на минуту, дайте мне выдохнуть."
+            
             r.raise_for_status()
             res = r.json()['choices'][0]['message']['content'].strip().replace("*", "")
             
@@ -88,8 +91,9 @@ async def handle(m: types.Message):
                 await m.answer(res)
             else:
                 await m.reply(res)
-            
-            if random.random() < 0.15:
+                
+            # Стикер отправляем только если это не сообщение об ошибке лимита
+            if "лимиты кончились" not in res and random.random() < 0.15:
                 await bot.send_sticker(m.chat.id, random.choice(STICKERS))
         except: pass
 
@@ -98,9 +102,7 @@ async def handle_hc(request): return web.Response(text="Alive")
 async def main():
     app = web.Application(); app.router.add_get("/", handle_hc)
     runner = web.AppRunner(app); await runner.setup()
-    port = int(os.getenv("PORT", 8080))
-    await web.TCPSite(runner, "0.0.0.0", port).start()
-    
+    await web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080))).start()
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
