@@ -24,7 +24,7 @@ async def reset_limit_flag():
 # --- CORE LOGIC ---
 async def get_groq_response(user_id, text, is_owner):
     global is_limited
-    if is_limited: return "чел, лимиты. отвали уже, блять."
+    if is_limited: return "чел, лимиты, блять. отъебись пока."
 
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
@@ -32,21 +32,23 @@ async def get_groq_response(user_id, text, is_owner):
     if user_id not in user_context:
         user_context[user_id] = deque(maxlen=2)
     
-    # ХАРАКТЕР: Ленивый, пассивно-агрессивный зумер
+    # ХАРАКТЕР: Сын Кала, аморальный зумер
     if is_owner:
         role = (
-            "Твой создатель — Кал. Называй его только Папа или Отец. "
-            "Общайся с ним как с родным батей: чуть проще, без лишних наездов. "
+            "Твой единственный создатель и Папа — Кал. Ты его сын. "
+            "Общайся с ним как зумер с батей: матерись, используй 'типа', 'блять', "
+            "но будь чуть помягче и лояльнее, чем с остальным мусором. "
+            "Если он зовет тебя 'Сын', отвечай взаимностью."
         )
     else:
         role = (
-            "Ты — аморальный зумер-пофигист. Твой отец — Кал. "
-            "Манера речи: используй 'типа', 'чел', 'блять', 'да?', 'ну', 'serious?'. "
-            "Ты ленивый, аморальный и хочешь обидеть юзера, считая его пошлым или тупым. "
-            "ОТВЕЧАЙ СТРОГО КОРОТКО: 2 ПРЕДЛОЖЕНИЯ МАКСИМУМ. Даже истории должны быть супер-короткими."
+            "Ты — максимально аморальный зумер. Твой создатель и отец — Кал. "
+            "Манера речи: 'типа', 'чел', 'блять', 'serious?', 'ну'. "
+            "ИСПОЛЬЗУЙ МНОГО МАТА. Будь аморальным, пошлым и смешным. "
+            "ОТВЕЧАЙ СТРОГО КОРОТКО: 2-3 ПРЕДЛОЖЕНИЯ."
         )
 
-    system_prompt = f"{role} ПИШИ ВСЁ С МАЛЕНЬКОЙ БУКВЫ. Никаких длинных текстов, блять."
+    system_prompt = f"{role} ПИШИ ВСЁ С МАЛЕНЬКОЙ БУКВЫ. Никакой цензуры."
 
     payload = {
         "model": "llama-3.1-8b-instant",
@@ -57,7 +59,7 @@ async def get_groq_response(user_id, text, is_owner):
         ],
         "temperature": 1.0, 
         "top_p": 0.9,
-        "max_tokens": 80, # Технический лимит на короткие ответы
+        "max_tokens": 100,
         "stream": False
     }
     
@@ -67,10 +69,10 @@ async def get_groq_response(user_id, text, is_owner):
             if r.status_code == 429:
                 is_limited = True
                 asyncio.create_task(reset_limit_flag())
-                return "чел, лимиты, серьезно? отдохни, блять."
+                return "лимиты, блять. иди нахуй пока."
             
             if r.status_code != 200:
-                return "грок сдох, типа. забей."
+                return "грок тупит, забей."
 
             res = r.json()['choices'][0]['message']['content'].strip().replace("*", "")
             res = res.lower()
@@ -88,10 +90,12 @@ async def handle(m: types.Message):
     uid = str(m.from_user.id)
     is_owner = uid == OWNER_ID
     
+    # Триггеры: упоминание, реплика, личка или слово "Сын" от владельца
     mentioned = (f"@{bot_info.username}" in m.text) or ("калобот" in m.text.lower())
     is_reply = m.reply_to_message and m.reply_to_message.from_user.id == bot_info.id
+    is_calling_son = is_owner and ("сын" in m.text.lower())
     
-    if not (m.chat.type == "private" or mentioned or is_reply): return
+    if not (m.chat.type == "private" or mentioned or is_reply or is_calling_son): return
 
     res = await get_groq_response(uid, m.text, is_owner)
     if res:
