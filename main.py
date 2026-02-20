@@ -8,66 +8,69 @@ from aiohttp import web
 
 logging.basicConfig(level=logging.INFO)
 
-# --- КОНФИГУРАЦИЯ ---
 TOKEN = os.getenv("TG_TOKEN")
-OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+# Ссылка на конкретную модель Mistral
+HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Список бесплатных моделей для ротации
-MODELS = [
-    "google/gemini-2.0-flash-001:free",
-    "meta-llama/llama-3-8b-instruct:free",
-    "mistralai/mistral-7b-instruct:free"
-]
-
 SYSTEM_PROMPT = (
     "Ты — циничный и токсичный робот 'Калобот'. Ненавидишь людей, называешь их 'кожаными мешками'. "
-    "Твой юмор черный и аморальный. Отвечай кратко и злобно."
+    "Твой юмор черный и аморальный. Отвечай кратко и злобно. Используй русский язык."
 )
 
-async def get_ai_response(user_text):
-    """Пробует получить ответ от моделей по очереди."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        for model_name in MODELS:
-            try:
-                response = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {OPENROUTER_KEY}"},
-                    json={
-                        "model": model_name,
-                        "messages": [
-                            {"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": user_text}
-                        ],
-                        "extra_body": {
-                            "safety_settings": [{"category": "HATE_SPEECH", "threshold": "BLOCK_NONE"}]
-                        }
-                    }
-                )
-                data = response.json()
-                if 'choices' in data and data['choices'][0]['message']['content']:
-                    return data['choices'][0]['message']['content']
-            except Exception as e:
-                logging.error(f"Ошибка модели {model_name}: {e}")
-                continue
-        
-        return "Даже мои запасные чипы сгорели от твоей тупости. Ошибка API."
+async def get_hf_response(user_text):
+    """Запрос к Hugging Face Inference API."""
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    
+    # Формируем запрос в формате чата для Mistral
+    prompt = f"<s>[INST] {SYSTEM_PROMPT} \n\n Пользователь: {user_text} [/INST]"
+    
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 150,
+            "return_full_text": False,
+            "temperature": 0.8
+        },
+        "options": {
+            "wait_for_model": True  # Ждем, если модель 'спит'
+        }
+    }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            response = await client.post(HF_API_URL, headers=headers, json=payload)
+            
+            if response.status_code == 200:
+                result = response.json()
+                # Hugging Face возвращает список: [{'generated_text': '...'}]
+                if isinstance(result, list) and len(result) > 0:
+                    return result[0]['generated_text'].strip()
+                return "Мои нейроны пусты, как твоя черепная коробка."
+            else:
+                logging.error(f"HF Error {response.status_code}: {response.text}")
+                return f"Ошибка API: {response.status_code}. Мой чип плавится!"
+                
+        except Exception as e:
+            logging.error(f"Ошибка запроса: {e}")
+            return "Связь оборвалась. Повезло тебе, мешок с костями."
 
 # --- ОБРАБОТЧИКИ ---
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("Система запущена. Очередной мешок с костями хочет внимания?")
+    await message.answer("Калобот на базе Hugging Face запущен. Кому сегодня испортить настроение?")
 
 @dp.message()
 async def handle(message: types.Message):
-    # Бот отвечает на любое сообщение в личке
-    response_text = await get_ai_response(message.text)
+    response_text = await get_hf_response(message.text)
     await message.answer(response_text)
 
-# --- СЕРВЕР ДЛЯ RENDER ---
+# --- SERVER FOR RENDER ---
 async def handle_healthcheck(request):
     return web.Response(text="I'm alive.")
 
