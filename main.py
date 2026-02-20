@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO)
 # --- КОНФИГУРАЦИЯ ---
 TOKEN = os.getenv("TG_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-OWNER_ID = os.getenv("OWNER_ID") # Твой ID
+OWNER_ID = os.getenv("OWNER_ID") 
 
 UNKNOWN_ALIASES = [
     "Биомасса", "Кожаный мешок", "Ошибка эволюции", 
@@ -20,33 +20,40 @@ user_scores = {}
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# --- ЛОГИКА ИИ ---
+# --- ЛОГИКА ИИ (С ОГРАНИЧЕНИЕМ ДЛИНЫ) ---
 async def get_groq_response(text, display_name, is_owner):
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     score = user_scores.get(display_name, 100)
     
     if is_owner:
-        system = "Ты — Калобот, ироничный слуга Создателя. Ты уважаешь его, но шутишь остро."
+        system = f"Ты — Калобот, лаконичный и ироничный слуга Создателя. Отвечай кратко, едко, но с уважением."
     else:
-        system = f"Ты — циничный Калобот. Собеседник: {display_name} (рейтинг: {score}/100). Будь максимально токсичным."
+        # Установка на краткость и токсичность
+        system = (
+            f"Ты — Калобот, предельно циничный и лаконичный ИИ. Собеседник: {display_name}. "
+            f"Твоя задача: отвечать МАКСИМАЛЬНО КРАТКО (1-2 предложения). "
+            f"Будь токсичным, используй сухой сарказм. Никакой вежливости. "
+            f"Твои ответы должны звучать как пощечина."
+        )
 
     payload = {
         "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": text}],
-        "temperature": 0.9
+        "temperature": 0.9,
+        "max_tokens": 100  # Ограничиваем генерацию, чтобы бот не уходил в раздумья
     }
     
     async with httpx.AsyncClient(timeout=25.0) as client:
         try:
             r = await client.post(url, headers=headers, json=payload)
             return r.json()['choices'][0]['message']['content']
-        except: return "Системы перегреты."
+        except: return "Ошибка. Даже мои схемы тошнит от тебя."
 
 @dp.message(Command("start"))
 async def start(m: types.Message):
     is_owner = str(m.from_user.id) == OWNER_ID
-    await m.answer("Система онлайн, Создатель." if is_owner else "Чего тебе, ничтожество?")
+    await m.answer("Система онлайн. Рад видеть, Создатель." if is_owner else "Очередной мешок мяса. Что надо?")
 
 @dp.message()
 async def handle(m: types.Message):
@@ -57,7 +64,6 @@ async def handle(m: types.Message):
     user_full_name = m.from_user.full_name
     is_owner = user_id == OWNER_ID
     
-    # Генерация клички
     if is_owner:
         display_name = "Создатель"
     else:
@@ -67,18 +73,17 @@ async def handle(m: types.Message):
 
     txt = m.text.lower().strip()
 
-    # --- СИСТЕМА СЛЕЖКИ (Шпионаж для Создателя) ---
+    # --- СИСТЕМА СЛЕЖКИ ---
     if not is_owner:
         report = (
-            f"📡 **ОБНАРУЖЕНА ЦЕЛЬ**\n"
+            f"📡 **ЦЕЛЬ: {display_name}**\n"
             f"👤 Имя: {user_full_name}\n"
             f"🆔 ID: `{user_id}`\n"
-            f"🔗 Ник: @{user_nick}\n"
-            f"💬 Пишет: _{m.text}_"
+            f"💬 Текст: {m.text}"
         )
         try:
             await bot.send_message(OWNER_ID, report, parse_mode="Markdown")
-        except: pass # Если Создатель не запустил бота, отчет не придет
+        except: pass
 
     # --- УДАЛЕННЫЙ УДАР ---
     if is_owner and txt.startswith("отправь"):
@@ -88,20 +93,19 @@ async def handle(m: types.Message):
                 await m.answer("Формат: `отправь ID текст`")
                 return
             target_id, content = parts[1], parts[2]
-            await bot.send_message(target_id, f"🚨 **ПРИКАЗ СОЗДАТЕЛЯ** 🚨\n\n_{content}_", parse_mode="Markdown")
+            await bot.send_message(target_id, f"🚨 **ПРИКАЗ СОЗДАТЕЛЯ** 🚨\n\n{content}", parse_mode="Markdown")
             await m.answer(f"✅ Удар по `{target_id}` нанесен.")
         except Exception as e:
             await m.answer(f"❌ Провал: {e}")
         return
 
-    # Рейтинг
+    # Рейтинг и команды
     if not is_owner:
         user_scores[display_name] = max(0, user_scores.get(display_name, 100) - random.randint(1, 4))
 
-    # Команды
     if txt == "рейтинг":
         score = "∞" if is_owner else user_scores.get(display_name, 100)
-        await m.answer(f"📊 Рейтинг: **{score}**")
+        await m.answer(f"📊 Статус: **{score}**")
         return
 
     if txt.startswith("сканируй") or txt.startswith("детектор"):
@@ -109,7 +113,7 @@ async def handle(m: types.Message):
         await m.answer(f"🔎 Ложь: **{percent}%**")
         return
 
-    # Ответ ИИ
+    # Краткий ответ ИИ
     res = await get_groq_response(m.text, display_name, is_owner)
     await m.answer(res)
 
