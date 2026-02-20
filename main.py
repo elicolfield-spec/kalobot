@@ -27,7 +27,10 @@ dp = Dispatcher()
 # --- ЛОГИКА ИИ ---
 async def get_groq_response(user_id, text, display_name):
     url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
     
     if user_id not in user_context:
         user_context[user_id] = deque(maxlen=4)
@@ -38,34 +41,38 @@ async def get_groq_response(user_id, text, display_name):
         f"Собеседник: {display_name}."
     )
 
-    # ОБНОВЛЕННЫЙ ID МОДЕЛИ (заменил 3.3-versatile на 3.3-specdec)
+    # Собираем историю правильно
+    messages = [{"role": "system", "content": system_prompt}]
+    for msg in user_context[user_id]:
+        messages.append(msg)
+    messages.append({"role": "user", "content": text})
+
     payload = {
-        "model": "llama-3.3-70b-specdec", 
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            *list(user_context[user_id]),
-            {"role": "user", "content": text}
-        ],
+        "model": "llama-3.1-70b-versatile", # Самая стабильная версия 70B на сегодня
+        "messages": messages,
         "temperature": 1.0,
-        "top_p": 0.9,
-        "max_tokens": 512
+        "max_tokens": 512,
+        "top_p": 1.0 # Убрал 0.9 для стандарта
     }
     
-    async with httpx.AsyncClient(timeout=25.0) as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             r = await client.post(url, headers=headers, json=payload)
             
             if r.status_code == 429:
                 return "Слышь, лимиты кончились! Завалите ебальники на минуту, дайте мне выдохнуть."
             
-            r.raise_for_status()
+            if r.status_code != 200:
+                logger.error(f"Ошибка Groq {r.status_code}: {r.text}")
+                return None
+                
             res = r.json()['choices'][0]['message']['content'].strip().replace("*", "")
             
             user_context[user_id].append({"role": "user", "content": text})
             user_context[user_id].append({"role": "assistant", "content": res})
             return res
         except Exception as e:
-            logger.error(f"Ошибка Groq: {e}")
+            logger.error(f"Ошибка: {e}")
             return None
 
 @dp.message(F.text)
