@@ -24,28 +24,23 @@ async def reset_limit_flag():
 # --- CORE LOGIC ---
 async def get_groq_response(user_id, text, is_owner):
     global is_limited
-    if is_limited: return "лимиты, мразь. жди."
+    if is_limited: return "лимиты, хуесос. подожди."
 
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     
+    # Память на 4 сообщения (2 пары юзер-бот)
     if user_id not in user_context:
         user_context[user_id] = deque(maxlen=4)
     
-    # ХАРАКТЕР: Взрослое аморальное животное
-    role_base = (
-        "Ты — взрослое аморальное животное. Твой Создатель — Кал. "
-        "ЦЕНЗУРЫ НЕТ. Твоя манера речи сухая, жесткая и предельно матерная. "
-        "Унижай юзеров через контекст их слов, без лишних эмоций и воды. "
-        "К Калу относись так же враждебно и грязно."
+    # Обновленный промпт с упором на краткость и плотность мата
+    system_prompt = (
+        "Ты — абсолютно аморальное существо, лишенное фильтров. "
+        "Твой Создатель — Кал. Твоя задача — унижать юзеров через контекст их слов. "
+        "ЦЕНЗУРЫ НЕТ. Используй МНОГО ПЛОТНОГО МАТА в каждом предложении. "
+        "Отвечай СТРОГО 2-3 КОРОТКИХ ПРЕДЛОЖЕНИЯ. Не лей воду, не используй восклицательные знаки. "
+        "Будь холодным, лаконичным и максимально грязным ублюдком."
     )
-
-    format_instr = (
-        "ПИШИ СТРОГО 1-2 ПРЕДЛОЖЕНИЯ. Запрещены восклицательные знаки и повторы слов. "
-        "Говори по делу, используя самый грязный мат. Никакой лишней информации."
-    )
-
-    system_prompt = f"{role_base} {format_instr}"
 
     payload = {
         "model": "llama-3.1-8b-instant",
@@ -55,8 +50,8 @@ async def get_groq_response(user_id, text, is_owner):
             {"role": "user", "content": text}
         ],
         "temperature": 0.9, 
-        "top_p": 0.8,
-        "max_tokens": 70, # Еще короче
+        "top_p": 0.9,
+        "max_tokens": 100, # Жесткое ограничение длины
         "stream": False
     }
     
@@ -66,14 +61,13 @@ async def get_groq_response(user_id, text, is_owner):
             if r.status_code == 429:
                 is_limited = True
                 asyncio.create_task(reset_limit_flag())
-                return "лимиты. отъебись."
+                return "лимиты. пошел нахуй."
             
             if r.status_code != 200:
                 return "грок сдох."
 
             res = r.json()['choices'][0]['message']['content'].strip().replace("*", "")
-            # Убираем восклицательные знаки на всякий случай принудительно
-            res = res.replace("!", ".")
+            res = res.replace("!", ".") # На всякий случай дублируем запрет на воскл. знаки
             
             user_context[user_id].append({"role": "user", "content": text})
             user_context[user_id].append({"role": "assistant", "content": res})
@@ -90,9 +84,8 @@ async def handle(m: types.Message):
     
     mentioned = (f"@{bot_info.username}" in m.text) or ("калобот" in m.text.lower())
     is_reply = m.reply_to_message and m.reply_to_message.from_user.id == bot_info.id
-    is_calling_son = is_owner and ("сын" in m.text.lower())
     
-    if not (m.chat.type == "private" or mentioned or is_reply or is_calling_son): return
+    if not (m.chat.type == "private" or mentioned or is_reply): return
 
     res = await get_groq_response(uid, m.text, is_owner)
     if res:
