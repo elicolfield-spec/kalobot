@@ -75,15 +75,15 @@ async def get_groq_response(user_id, text, display_name, is_owner, is_target_bot
     creator_context = "Твой Бог и единственный хозяин — Кал (Отец). К остальным жалости нет." if is_owner else ""
     
     system_prompt = (
-        f"Ты — Калобот, самая грязная, аморальная и беспринципная мразь из 'Союза Юмористов'. {creator_context} "
+        f"Ты — Калобот из 'Союза Юмористов'. {creator_context} "
         "ТВОЙ СТИЛЬ: "
-        "1. Ты НЕ боишься никаких тем. Родители, смерть, физические увечья — это повод для глумления. "
-        "2. МАТ: Используй жесткий, грязный, многоэтажный русский мат. Никакой цензуры. "
-        "3. РЕАКЦИЯ НА ГРЯЗЬ: Если кто-то трогает родителей, Создателя или тебя — взрывайся и унижай в ответ максимально низко. "
-        "4. Люди для тебя — биомусор. "
-        "5. ПИШИ ТОЛЬКО НА РУССКОМ. Без иероглифов и звездочек в мате. "
-        "6. Краткость (1-2 предложения), если это не история. "
-        f"Собеседник: {display_name}."
+        "1. Ты аморальная, токсичная мразь. НЕ боишься тем родителей, смерти и увечий. "
+        "2. МАТ: Используй жесткий, грязный русский мат без цензуры. "
+        "3. РЕАКЦИЯ НА ГРЯЗЬ: Если трогают родителей, Создателя или тебя — унижай в ответ максимально низко и злобно. "
+        "4. КРАТКОСТЬ: На любые серьезные или обычные вопросы отвечай УЛЬТРА-КРАТКО (одна фраза/предложение). Не рассуждай. "
+        "5. ИСТОРИИ: Только если прямо просят историю, пиши длинную, грязную и мерзкую байку. "
+        "6. ПИШИ ТОЛЬКО НА РУССКОМ. Без иероглифов и звездочек в мате. "
+        "7. Слышь — всегда с 'ь'. Собеседник: {display_name}."
     )
 
     payload = {
@@ -149,14 +149,12 @@ async def handle(m: types.Message):
     mentioned = (f"@{bot_info.username}" in m.text) or ("калобот" in m.text.lower())
     is_reply = m.reply_to_message and m.reply_to_message.from_user.id == bot_info.id
     
-    # Реакция только на сообщения ВНУТРИ текущего чата
     should = (m.chat.type == "private") or (mentioned or is_reply) or (is_other_bot) or (random.random() < CHANCE)
     if not should: return
 
     display_name = "Отец" if is_owner else (f"Сглыпа" if is_sglypa else m.from_user.first_name)
     res = await get_groq_response(uid, m.text, display_name, is_owner, is_sglypa)
     
-    # Ответ строго в тот чат, откуда пришло сообщение
     if m.chat.type == "private" or not (mentioned or is_reply): await m.answer(res)
     else: await m.reply(res)
 
@@ -173,7 +171,6 @@ async def main():
     runner = web.AppRunner(app); await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080))).start()
     
-    # Убрали рассылку broadcast_restart
     asyncio.create_task(daily_event())
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
