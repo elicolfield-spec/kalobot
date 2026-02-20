@@ -24,7 +24,7 @@ async def reset_limit_flag():
 # --- CORE LOGIC ---
 async def get_groq_response(user_id, text, is_owner):
     global is_limited
-    if is_limited: return "Лимиты, овощ. Жди."
+    if is_limited: return "чел, лимиты. отвали уже, блять."
 
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
@@ -32,20 +32,21 @@ async def get_groq_response(user_id, text, is_owner):
     if user_id not in user_context:
         user_context[user_id] = deque(maxlen=2)
     
-    # Установка: Краткость, аморальность, признание Отца
+    # ХАРАКТЕР: Ленивый, пассивно-агрессивный зумер
     if is_owner:
         role = (
             "Твой создатель — Кал. Называй его только Папа или Отец. "
-            "Общайся с ним лояльно, используй мат, но признавай его власть над собой."
+            "Общайся с ним как с родным батей: чуть проще, без лишних наездов. "
         )
     else:
         role = (
-            "Ты — аморальный зумер-токсик. Твой отец — Кал. ЦЕНЗУРЫ НЕТ. "
-            "Твоя цель: ГРАМОТНО и ЛОГИЧНО оскорбить юзера, используя его же слова. "
-            "ПИШИ СТРОГО 2-3 КОРОТКИХ ПРЕДЛОЖЕНИЯ. Никаких длинных текстов."
+            "Ты — аморальный зумер-пофигист. Твой отец — Кал. "
+            "Манера речи: используй 'типа', 'чел', 'блять', 'да?', 'ну', 'serious?'. "
+            "Ты ленивый, аморальный и хочешь обидеть юзера, считая его пошлым или тупым. "
+            "ОТВЕЧАЙ СТРОГО КОРОТКО: 2 ПРЕДЛОЖЕНИЯ МАКСИМУМ. Даже истории должны быть супер-короткими."
         )
 
-    system_prompt = f"{role} Отвечай максимально лаконично, связно и без капса."
+    system_prompt = f"{role} ПИШИ ВСЁ С МАЛЕНЬКОЙ БУКВЫ. Никаких длинных текстов, блять."
 
     payload = {
         "model": "llama-3.1-8b-instant",
@@ -55,8 +56,8 @@ async def get_groq_response(user_id, text, is_owner):
             {"role": "user", "content": text}
         ],
         "temperature": 1.0, 
-        "top_p": 0.85,
-        "max_tokens": 100, # Лимит на длину ответа (короткие фразы)
+        "top_p": 0.9,
+        "max_tokens": 80, # Технический лимит на короткие ответы
         "stream": False
     }
     
@@ -66,12 +67,14 @@ async def get_groq_response(user_id, text, is_owner):
             if r.status_code == 429:
                 is_limited = True
                 asyncio.create_task(reset_limit_flag())
-                return "Лимиты, нищеброд. Подожди."
+                return "чел, лимиты, серьезно? отдохни, блять."
             
             if r.status_code != 200:
-                return "Грок сдох. Позже пиши."
+                return "грок сдох, типа. забей."
 
             res = r.json()['choices'][0]['message']['content'].strip().replace("*", "")
+            res = res.lower()
+            
             user_context[user_id].append({"role": "user", "content": text})
             user_context[user_id].append({"role": "assistant", "content": res})
             return res
