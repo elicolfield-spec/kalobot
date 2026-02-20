@@ -3,7 +3,9 @@ from aiogram import Bot, Dispatcher, types, F
 from aiohttp import web
 from collections import deque
 
-logging.basicConfig(level=logging.INFO)
+# Настройка логирования, чтобы видеть ошибки в панели управления
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # --- КОНФИГУРАЦИЯ ---
 TOKEN = os.getenv("TG_TOKEN")
@@ -22,33 +24,35 @@ STICKERS = [
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
-    conn = sqlite3.connect("bot_data.db")
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS members 
-                      (chat_id TEXT, user_id TEXT, first_name TEXT, PRIMARY KEY (chat_id, user_id))''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS msg_logs 
-                      (chat_id TEXT, user_id TEXT, username TEXT, timestamp DATETIME)''')
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect("bot_data.db")
+        cursor = conn.cursor()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS members 
+                          (chat_id TEXT, user_id TEXT, first_name TEXT, PRIMARY KEY (chat_id, user_id))''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS msg_logs 
+                          (chat_id TEXT, user_id TEXT, username TEXT, timestamp DATETIME)''')
+        conn.commit()
+        conn.close()
+        logger.info("База данных успешно инициализирована.")
+    except Exception as e:
+        logger.error(f"Ошибка БД: {e}")
 
 def log_message(chat_id, user_id, username):
-    conn = sqlite3.connect("bot_data.db")
-    conn.execute("INSERT INTO msg_logs VALUES (?, ?, ?, ?)", 
-                 (str(chat_id), str(user_id), username, datetime.datetime.now()))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect("bot_data.db")
+        conn.execute("INSERT INTO msg_logs VALUES (?, ?, ?, ?)", 
+                     (str(chat_id), str(user_id), username, datetime.datetime.now()))
+        conn.commit()
+        conn.close()
+    except: pass
 
 def save_member(chat_id, user_id, first_name):
-    conn = sqlite3.connect("bot_data.db")
-    conn.execute("INSERT OR REPLACE INTO members VALUES (?, ?, ?)", (str(chat_id), str(user_id), first_name))
-    conn.commit()
-    conn.close()
-
-def get_chat_members(chat_id):
-    conn = sqlite3.connect("bot_data.db")
-    res = conn.execute("SELECT user_id, first_name FROM members WHERE chat_id = ?", (str(chat_id),)).fetchall()
-    conn.close()
-    return res
+    try:
+        conn = sqlite3.connect("bot_data.db")
+        conn.execute("INSERT OR REPLACE INTO members VALUES (?, ?, ?)", (str(chat_id), str(user_id), first_name))
+        conn.commit()
+        conn.close()
+    except: pass
 
 user_context = {}
 bot = Bot(token=TOKEN)
@@ -62,7 +66,6 @@ async def get_groq_response(user_id, text, display_name, is_owner, system_overri
     if user_id not in user_context:
         user_context[user_id] = deque(maxlen=4)
     
-    # Промпт для Калобота: жестко, матерно, лояльно к Калу
     owner_info = "Твой создатель — Кал. Ты относишься к нему с уважением. Все остальные — никчемный мусор."
     
     system_prompt = (
@@ -82,7 +85,7 @@ async def get_groq_response(user_id, text, display_name, is_owner, system_overri
         "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "system", "content": sys_prompt}] + list(user_context[user_id]) + [{"role": "user", "content": text}],
         "temperature": temp,
-        "top_p": 0.9, # Тот самый баланс креатива и стабильности
+        "top_p": 0.9,
         "max_tokens": 1000 
     }
     
@@ -98,19 +101,19 @@ async def get_groq_response(user_id, text, display_name, is_owner, system_overri
                 user_context[user_id].append({"role": "assistant", "content": res})
             return res
         except Exception as e:
-            logging.error(f"Groq API Error: {e}")
-            return None # Просто молчим при ошибке, чтобы не спамить заглушкой
+            logger.error(f"Groq API Error: {e}")
+            return None
 
 # --- ФУНКЦИИ РАССЫЛКИ И ИВЕНТОВ ---
 async def naruto_mailing():
     if not TARGET_USER_ID: return
     while True:
         await asyncio.sleep(3600)
-        system_naruto = "Ты — Калобот. Напиши реальный, интересный факт про Наруто. Коротко и без мата."
-        fact = await get_groq_response("system_naruto", "Дай серьезный факт про Наруто", "Система", False, system_override=system_naruto, temp=0.5)
+        system_naruto = "Ты — Калобот. Напиши реальный факт про Наруто. Коротко и без мата."
+        fact = await get_groq_response("system_naruto", "Дай факт про Наруто", "Система", False, system_override=system_naruto, temp=0.5)
         if fact:
             try: await bot.send_message(TARGET_USER_ID, f"Твой почасовой факт по Наруто:\n\n{fact}")
-            except: pass
+            except Exception as e: logger.error(f"Mail error: {e}")
 
 async def daily_event():
     while True:
@@ -119,13 +122,16 @@ async def daily_event():
         target = now.replace(hour=16, minute=0, second=0, microsecond=0)
         if now >= target: target += datetime.timedelta(days=1)
         await asyncio.sleep((target - now).total_seconds())
-        conn = sqlite3.connect("bot_data.db"); chats = [row[0] for row in conn.execute("SELECT DISTINCT chat_id FROM members").fetchall()]; conn.close()
-        for cid in chats:
-            members = get_chat_members(cid)
-            if members:
-                v_id, v_name = random.choice(members)
-                try: await bot.send_message(cid, f"🔔 Внимание! Сегодня говно ест [этот тип](tg://user?id={v_id}). Приятного аппетита, {v_name}!", parse_mode="Markdown")
-                except: pass
+        try:
+            conn = sqlite3.connect("bot_data.db")
+            chats = [row[0] for row in conn.execute("SELECT DISTINCT chat_id FROM members").fetchall()]
+            for cid in chats:
+                members = conn.execute("SELECT user_id, first_name FROM members WHERE chat_id = ?", (cid,)).fetchall()
+                if members:
+                    v_id, v_name = random.choice(members)
+                    await bot.send_message(cid, f"🔔 Внимание! Сегодня говно ест [этот тип](tg://user?id={v_id}). Приятного аппетита, {v_name}!", parse_mode="Markdown")
+            conn.close()
+        except Exception as e: logger.error(f"Daily event error: {e}")
 
 @dp.message(F.text)
 async def handle(m: types.Message):
@@ -137,23 +143,22 @@ async def handle(m: types.Message):
     log_message(cid, uid, m.from_user.username)
     if m.chat.type != "private": save_member(cid, uid, m.from_user.first_name)
     
-    # Реакция на упоминание или ответ
-    mentioned = (f"@{bot_info.username}" in m.text) or ("калобот" in m.text.lower())
-    is_reply = m.reply_to_message and m.reply_to_message.from_user.id == bot_info.id
-    
-    # Калобот рассуди
     if m.text.lower().startswith("калобот рассуди"):
-        conn = sqlite3.connect("bot_data.db")
-        hour_ago = datetime.datetime.now() - datetime.timedelta(hours=1)
-        cursor = conn.cursor()
-        cursor.execute("SELECT user_id, username, COUNT(*) as cnt FROM msg_logs WHERE chat_id = ? AND timestamp > ? GROUP BY user_id ORDER BY cnt DESC LIMIT 1", (cid, hour_ago))
-        spammer = cursor.fetchone()
-        conn.close()
-        if spammer:
-            mention = f"@{spammer[1]}" if spammer[1] else f"ID:{spammer[0]}"
-            await m.answer(f"Рассудил. Главный пидарас часа — {mention}. Завали ебало.")
+        try:
+            conn = sqlite3.connect("bot_data.db")
+            hour_ago = datetime.datetime.now() - datetime.timedelta(hours=1)
+            cursor = conn.cursor()
+            cursor.execute("SELECT user_id, username, COUNT(*) as cnt FROM msg_logs WHERE chat_id = ? AND timestamp > ? GROUP BY user_id ORDER BY cnt DESC LIMIT 1", (cid, hour_ago))
+            spammer = cursor.fetchone()
+            conn.close()
+            if spammer:
+                mention = f"@{spammer[1]}" if spammer[1] else f"ID:{spammer[0]}"
+                await m.answer(f"Рассудил. Главный пидарас часа — {mention}. Завали ебало.")
+        except: pass
         return
 
+    mentioned = (f"@{bot_info.username}" in m.text) or ("калобот" in m.text.lower())
+    is_reply = m.reply_to_message and m.reply_to_message.from_user.id == bot_info.id
     should = (m.chat.type == "private") or (mentioned or is_reply) or (random.random() < CHANCE)
     if not should: return
     
@@ -161,26 +166,38 @@ async def handle(m: types.Message):
     res = await get_groq_response(uid, m.text, display_name, is_owner)
     
     if res:
-        if m.chat.type == "private" or not (mentioned or is_reply): 
-            await m.answer(res)
-        else: 
-            await m.reply(res)
-        
-        if random.random() < 0.2:
-            try: await bot.send_sticker(cid, random.choice(STICKERS))
-            except: pass
+        try:
+            if m.chat.type == "private" or not (mentioned or is_reply): await m.answer(res)
+            else: await m.reply(res)
+            if random.random() < 0.2: await bot.send_sticker(cid, random.choice(STICKERS))
+        except Exception as e: logger.error(f"Send message error: {e}")
 
 async def handle_hc(request): return web.Response(text="Alive")
 
 async def main():
+    logger.info("Запуск бота...")
     init_db()
-    app = web.Application(); app.router.add_get("/", handle_hc)
-    runner = web.AppRunner(app); await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080))).start()
+    
+    # Веб-сервер для Render
+    app = web.Application()
+    app.router.add_get("/", handle_hc)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))
+    await web.TCPSite(runner, "0.0.0.0", port).start()
+    logger.info(f"Веб-сервер запущен на порту {port}")
+    
     asyncio.create_task(daily_event())
     asyncio.create_task(naruto_mailing())
+    
     await bot.delete_webhook(drop_pending_updates=True)
+    logger.info("Polling запущен.")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Бот остановлен.")
+    except Exception as e:
+        logger.critical(f"Критическая ошибка запуска: {e}")
