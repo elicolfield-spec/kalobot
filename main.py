@@ -41,11 +41,9 @@ async def get_groq_response(user_id, text, display_name):
         f"Собеседник: {display_name}."
     )
 
-    # Ставим модель, которая пришла на замену списанным
-    # Это либо llama-3.3-70b-versatile (если они ее починили), 
-    # либо llama3-70b-8192 (классика). Попробуем классику, она вечна.
+    # Единственная выжившая мощная модель на текущий момент
     payload = {
-        "model": "llama3-70b-8192", 
+        "model": "llama-3.3-70b-versatile", 
         "messages": [
             {"role": "system", "content": system_prompt},
             *list(user_context[user_id]),
@@ -64,7 +62,14 @@ async def get_groq_response(user_id, text, display_name):
             
             if r.status_code != 200:
                 logger.error(f"Ошибка Groq {r.status_code}: {r.text}")
-                return None
+                # Если даже эта модель выдаст 404, попробуем 8B модель, которая ВСЕГДА жива
+                if r.status_code == 404:
+                    logger.warning("70B не найдена, пробую аварийную llama-3.1-8b-instant")
+                    payload["model"] = "llama-3.1-8b-instant"
+                    r = await client.post(url, headers=headers, json=payload)
+                    r.raise_for_status()
+                else:
+                    return None
                 
             res = r.json()['choices'][0]['message']['content'].strip().replace("*", "")
             
