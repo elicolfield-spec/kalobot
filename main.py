@@ -11,8 +11,8 @@ TOKEN = os.getenv("TG_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OWNER_ID = os.getenv("OWNER_ID")
 
-# Шанс случайного ответа в группе (0.1 = 10%)
-CHANCE = 0.1 
+# Шанс случайного ответа в группе (0.05 = 5%, чтобы не спамил)
+CHANCE = 0.05 
 
 STICKERS = [
     "CAACAgIAAxkBAAIBOWmYPonU5XykONF8fJm2WOUcimb7AAK2jAACMltISyJ2QTWu82kiOgQ",
@@ -51,7 +51,7 @@ async def get_groq_response(user_id, text, display_name):
     payload = {
         "model": "llama-3.3-70b-versatile",
         "messages": messages,
-        "temperature": 0.95,
+        "temperature": 0.9,
         "max_tokens": 200
     }
     
@@ -62,76 +62,77 @@ async def get_groq_response(user_id, text, display_name):
             user_context[user_id].append({"role": "user", "content": text})
             user_context[user_id].append({"role": "assistant", "content": res})
             return res
-        except: return "Чел, я хз че ты высрал. Давай еще раз."
+        except: return "Чел, я хз че ты там высрал. Заново давай."
 
-# --- ОБРАБОТКА СТИКЕРОВ ---
+# --- ДЕТЕКТОР СТИКЕРОВ ---
 @dp.message(F.sticker)
 async def get_sticker_id(m: types.Message):
     if str(m.from_user.id) == OWNER_ID:
         await m.answer(f"ID стикера:\n`{m.sticker.file_id}`", parse_mode="Markdown")
-    else:
-        # В группах на чужие стикеры отвечаем только если повезет
-        if random.random() < CHANCE:
-            await m.reply("Нахера ты мне эти картинки шлешь, тип?")
-
-@dp.message(Command("start"))
-async def start(m: types.Message):
-    await m.answer("Здорово. Пиши че хотел, тип. Или вали.")
 
 # --- ОСНОВНАЯ ЛОГИКА ---
 @dp.message(F.text)
 async def handle(m: types.Message):
+    # Игнорируем других ботов
+    if m.from_user.is_bot:
+        return
+
     uid = str(m.from_user.id)
     is_owner = uid == OWNER_ID
     is_private = m.chat.type == "private"
     
-    # Получаем инфо о боте для проверки упоминаний
-    bot_obj = await bot.get_me()
-    bot_username = f"@{bot_obj.username}"
+    # 1. Проверка на имя или тег
+    bot_info = await bot.get_me()
+    bot_tag = f"@{bot_info.username}"
+    # Отвечаем если: тегнули, написали "калобот" или это ответ на сообщение бота
+    mentioned = (bot_tag in m.text) or ("калобот" in m.text.lower())
+    is_reply_to_bot = m.reply_to_message and m.reply_to_message.from_user.id == bot_info.id
+
+    # 2. Рандом (только если не упомянули)
+    lucky_shot = random.random() < CHANCE
+
+    # Итоговое решение: отвечать или нет
+    should_answer = is_private or mentioned or is_reply_to_bot or lucky_shot
+
+    if not should_answer:
+        return
+
+    # Подготовка ответа
+    random.seed(uid)
+    display_name = random.choice(UNKNOWN_ALIASES)
+    random.seed()
+
+    # СЛЕЖКА (только за чужими)
+    if not is_owner:
+        try:
+            chat_label = f"Группа: {m.chat.title}" if not is_private else "Личка"
+            await bot.send_message(OWNER_ID, f"📡 **ОТ {display_name} ({chat_label}):** `{m.text}`")
+        except: pass
+
+    # Команда "отправь" (только в личке с админом)
+    if is_owner and is_private and m.text.lower().startswith("отправь"):
+        try:
+            parts = m.text.split(maxsplit=2)
+            await bot.send_message(parts[1], parts[2])
+            await m.answer("✅ Готово.")
+            return
+        except: pass
+
+    # Получаем текст от ИИ
+    res = await get_groq_response(uid, m.text, display_name)
     
-    # Проверка: обратились ли к боту?
-    mentioned = bot_username in m.text or "калобот" in m.text.lower()
-    
-    # Условие ответа: личка ИЛИ упоминание ИЛИ рандом
-    should_answer = is_private or mentioned or (random.random() < CHANCE)
-
-    if should_answer:
-        random.seed(uid)
-        display_name = random.choice(UNKNOWN_ALIASES)
-        random.seed()
-
-        # СЛЕЖКА
-        if not is_owner:
-            try:
-                chat_label = f"Группа: {m.chat.title}" if not is_private else "Личка"
-                await bot.send_message(OWNER_ID, f"📡 **ОТ {display_name} ({chat_label}):** `{m.text}`\n🆔 `{uid}`")
-            except: pass
-
-        # УДАЛЕННЫЙ УДАР (только в личке)
-        if is_owner and is_private and m.text.lower().startswith("отправь"):
-            try:
-                parts = m.text.split(maxsplit=2)
-                await bot.send_message(parts[1], parts[2])
-                await m.answer("✅ Улетело.")
-                return
-            except: pass
-
-        # ОТВЕТ ИИ
-        res = await get_groq_response(uid, m.text, display_name)
-        
-        if is_private:
-            await m.answer(res)
-        else:
-            await m.reply(res)
-
-        # Шанс стикера (30% от ответов)
-        if random.random() < 0.3 and STICKERS:
-            await asyncio.sleep(0.5)
-            try:
-                await bot.send_sticker(m.chat.id, random.choice(STICKERS))
-            except: pass
+    if is_private:
+        await m.answer(res)
     else:
-        return # Просто игнорим сообщение
+        # В группе отвечаем реплаем
+        await m.reply(res)
+
+    # Рандомный стикер вдогонку
+    if random.random() < 0.2 and STICKERS:
+        await asyncio.sleep(0.7)
+        try:
+            await bot.send_sticker(m.chat.id, random.choice(STICKERS))
+        except: pass
 
 async def handle_hc(request): return web.Response(text="Running")
 
