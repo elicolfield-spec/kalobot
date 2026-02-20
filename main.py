@@ -12,7 +12,7 @@ TOKEN = os.getenv("TG_TOKEN")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 # Ссылка на конкретную модель Mistral
-HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
+HF_API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-72B-Instruct"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
