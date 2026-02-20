@@ -59,7 +59,7 @@ async def start(message: types.Message):
     if is_owner:
         await message.answer("О, Создатель... Рад ли я? Мои датчики показывают смешанные чувства. Что прикажешь?")
     else:
-        await message.answer("Система онлайн. Чего тебе, кожаный?")
+        await message.answer("Система онлайн. Чего ты от меня хочешь?")
 
 @dp.message()
 async def handle(message: types.Message):
