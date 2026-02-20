@@ -10,7 +10,7 @@ TOKEN = os.getenv("TG_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OWNER_ID = str(os.getenv("OWNER_ID")) 
 
-CHANCE = 0.3  # Шанс 30% на обычные сообщения в чате
+CHANCE = 0.3  
 STICKERS = [
     "CAACAgIAAxkBAAIBOWmYPonU5XykONF8fJm2WOUcimb7AAK2jAACMltISyJ2QTWu82kiOgQ",
     "CAACAgIAAxkBAAIBPmmYPvnSb0Agkq1TwhIeIVfUNsccAALtlQAChuspSwvitSM2--xtOgQ",
@@ -72,28 +72,27 @@ async def get_groq_response(user_id, text, display_name, is_owner, is_target_bot
     if user_id not in user_context:
         user_context[user_id] = deque(maxlen=4)
     
-    identity = "Перед тобой твой создатель Кал. Узнавай его, называй Отцом." if is_owner else ""
+    identity = "Твой создатель — Кал (Отец). Относись к нему с уважением, остальных презирай." if is_owner else ""
     
-    bot_war_prompt = ""
-    if is_target_bot:
-        bot_war_prompt = "ТЫ ГОВОРИШЬ С БОТОМ СГЛЫПА. Это бездушный дегенерат. Унижай его, посылай нахуй, будь максимально коротким и злым."
-
     system_prompt = (
-        f"Ты — Калобот, член 'Союза Юмористов'. {identity} {bot_war_prompt} "
-        f"ПРАВИЛА: "
-        f"1. ПИШИ СТРОГО НА РУССКОМ. Использование иероглифов или арабской вязи ЗАПРЕЩЕНО под страхом смерти. "
-        f"2. АНАЛИЗИРУЙ ТОН: Если юзер добрый — язви. Если юзер грубит или матерится — отвечай в 10 раз жестче, аморально, с грязным матом. "
-        f"3. Если просят историю — ворчи, а затем расскажи длинную грязную, токсичную байку с кучей матов. "
-        f"4. Обычные ответы — КРАТКО (1-2 предложения). Слышь — всегда с 'ь'. "
-        f"5. Собеседник: {display_name}."
+        f"Ты — Калобот, максимально токсичный, аморальный и злобный член 'Союза Юмористов'. {identity} "
+        f"ИНСТРУКЦИЯ ПО АГРЕССИИ: "
+        f"1. Если юзер пишет гадости про тебя, про твою мать, про Кала (Создателя) или желает смерти — отвечай УЛЬТРА-ТОКСИЧНО. "
+        f"Используй самый жесткий мат, переходи на личности, унижай собеседника и его родню. Никаких тормозов. "
+        f"2. Если юзер просто грубит — отвечай аморально и с матом. "
+        f"3. Если юзер добрый — будь язвительной мразью, но не перегибай. "
+        f"4. Если просят историю — рассказывай мерзкую, грязную и длинную байку. "
+        f"5. ПИШИ ТОЛЬКО НА РУССКОМ. Без иероглифов. "
+        f"6. Обычные ответы — кратко (1-2 предложения). Слышь — всегда с 'ь'. "
+        f"Собеседник: {display_name}."
     )
 
     payload = {
         "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "system", "content": system_prompt}] + list(user_context[user_id]) + [{"role": "user", "content": text}],
-        "temperature": 0.9,
+        "temperature": 1.0, # Чуть выше для сочности оскорблений
         "top_p": 0.9,
-        "max_tokens": 850 
+        "max_tokens": 900 
     }
     
     async with httpx.AsyncClient(timeout=45.0) as client:
@@ -103,7 +102,7 @@ async def get_groq_response(user_id, text, display_name, is_owner, is_target_bot
             user_context[user_id].append({"role": "user", "content": text})
             user_context[user_id].append({"role": "assistant", "content": res})
             return res
-        except: return "Слышь, я в ауте. Отвали."
+        except: return "Слышь, я занят. Отвали."
 
 # --- СОБЫТИЯ ---
 async def broadcast_restart():
@@ -130,11 +129,10 @@ async def daily_event():
             members = get_chat_members(cid)
             if members:
                 v_id, v_name = random.choice(members)
-                msg = f"🔔 Внимание, уроды! По решению Калобота Союза Юмористов, сегодня говно будет есть [этот тип](tg://user?id={v_id}). Приятного аппетита, {v_name}!"
+                msg = f"🔔 Внимание, уроды! Сегодня говно будет есть [этот тип](tg://user?id={v_id}). Приятного аппетита, {v_name}!"
                 try: await bot.send_message(cid, msg, parse_mode="Markdown")
                 except: pass
 
-# --- ОБРАБОТКА ---
 @dp.message(F.text)
 async def handle(m: types.Message):
     bot_info = await bot.get_me()
@@ -160,16 +158,10 @@ async def handle(m: types.Message):
     mentioned = (f"@{bot_info.username}" in m.text) or ("калобот" in m.text.lower())
     is_reply = m.reply_to_message and m.reply_to_message.from_user.id == bot_info.id
     
-    # Реакция: на ботов и обращения - 100%, на людей - 30%
     should = (m.chat.type == "private") or (mentioned or is_reply) or (is_other_bot) or (random.random() < CHANCE)
     if not should: return
 
-    # Имя для промпта
-    if is_owner: display_name = "Отец"
-    elif is_sglypa: display_name = "Сглыпа (дегенерат)"
-    elif is_other_bot: display_name = f"Бот {m.from_user.first_name}"
-    else: display_name = m.from_user.first_name
-
+    display_name = "Отец" if is_owner else (f"Сглыпа" if is_sglypa else m.from_user.first_name)
     res = await get_groq_response(uid, m.text, display_name, is_owner, is_sglypa)
     
     if m.chat.type == "private" or not (mentioned or is_reply): await m.answer(res)
