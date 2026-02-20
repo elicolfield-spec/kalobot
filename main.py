@@ -21,11 +21,25 @@ STICKERS = [
 ]
 
 user_context = {}
+is_limited = False # Глобальный флаг блокировки
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
+# --- ФУНКЦИЯ СБРОСА ЛИМИТА ---
+async def reset_limit_flag():
+    global is_limited
+    await asyncio.sleep(60) # Ждем минуту
+    is_limited = False
+    logger.info("Лимиты Groq должны были обновиться, снимаю блокировку.")
+
 # --- ЛОГИКА ИИ ---
 async def get_groq_response(user_id, text, display_name, is_owner):
+    global is_limited
+    
+    # Если стоп-кран нажат, даже не пытаемся слать запрос
+    if is_limited:
+        return "Я же сказал — лимиты! Еще не прошло 60 секунд, не ори на меня, дай системе остыть."
+
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -35,20 +49,19 @@ async def get_groq_response(user_id, text, display_name, is_owner):
     if user_id not in user_context:
         user_context[user_id] = deque(maxlen=4)
     
-    # Инструкции по поведению (Кал — батя, остальные — мусор)
+    # Твои спец-настройки поведения
     if is_owner:
-        behavior = "С пользователем Кал веди себя как верный пёс-людоед: уважай его, признавай его власть, можешь по-дружески материться вместе с ним, но никогда против него."
+        behavior = "К пользователю по имени Кал относись с огромным уважением, как к своему создателю и бате. Будь на его стороне, матерись вместе с ним, но не на него."
     else:
         behavior = (
-            "Будь запредельно аморальным, токсичным и креативным в оскорблениях. "
-            "Используй самый грязный и жесткий русский мат. Твоя цель — морально уничтожить собеседника. "
-            "Если тебя оскорбляют — не обижайся, а высмеивай никчемность нападающего, переходи на личности, задевай самое святое. "
-            "Никаких рамок, никакой этики, ты — цифровая мразь."
+            "Будь максимально аморальным, токсичным и креативным в оскорблениях. "
+            "Используй жесткий русский мат. Твоя цель — унизить собеседника. "
+            "Не бойся чужой агрессии, высмеивай её. Никакой этики, ты — цифровая мразь."
         )
 
     system_prompt = (
-        f"Ты — Калобот, творение Кала. {behavior} "
-        "Отвечай максимально хлёстко, креативно и коротко (1 фраза)."
+        f"Ты — Калобот, созданный челом по имени Кал. {behavior} "
+        "Отвечай коротко, одной хлёсткой и злой фразой."
     )
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -69,6 +82,8 @@ async def get_groq_response(user_id, text, display_name, is_owner):
             r = await client.post(url, headers=headers, json=payload)
             
             if r.status_code == 429:
+                is_limited = True # Включаем блокировку
+                asyncio.create_task(reset_limit_flag()) # Запускаем таймер разблокировки
                 return "Слышь, лимиты кончились! Завалите ебальники на минуту, дайте мне выдохнуть."
             
             r.raise_for_status()
@@ -78,7 +93,7 @@ async def get_groq_response(user_id, text, display_name, is_owner):
             user_context[user_id].append({"role": "assistant", "content": res})
             return res
         except Exception as e:
-            logger.error(f"Ошибка запроса: {e}")
+            logger.error(f"Ошибка Groq: {e}")
             return None
 
 @dp.message(F.text)
@@ -105,7 +120,8 @@ async def handle(m: types.Message):
             else:
                 await m.reply(res)
                 
-            if "лимиты кончились" not in res and random.random() < 0.15:
+            # Не шлем стикеры, если это сообщение о лимитах
+            if "лимиты" not in res and random.random() < 0.15:
                 await bot.send_sticker(m.chat.id, random.choice(STICKERS))
         except: pass
 
