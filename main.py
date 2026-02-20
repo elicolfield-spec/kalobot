@@ -38,9 +38,10 @@ async def get_groq_response(user_id, text, display_name):
         f"Собеседник: {display_name}."
     )
 
+    # Старый надежный метод сборки сообщений
     messages = [{"role": "system", "content": system_prompt}]
-    for msg in user_context[user_id]:
-        messages.append(msg)
+    for m in user_context[user_id]:
+        messages.append(m)
     messages.append({"role": "user", "content": text})
 
     payload = {
@@ -88,17 +89,17 @@ async def handle(m: types.Message):
             else:
                 await m.reply(res)
             
-            if random.random() < 0.15: # Шанс стикера чуть снизил
+            if random.random() < 0.15:
                 await bot.send_sticker(m.chat.id, random.choice(STICKERS))
         except: pass
 
 async def handle_hc(request): return web.Response(text="Alive")
 
 async def main():
-    # Простейший веб-сервер для Render
     app = web.Application(); app.router.add_get("/", handle_hc)
     runner = web.AppRunner(app); await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080))).start()
+    port = int(os.getenv("PORT", 8080))
+    await web.TCPSite(runner, "0.0.0.0", port).start()
     
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
