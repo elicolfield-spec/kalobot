@@ -2,6 +2,7 @@ import os, asyncio, httpx, logging, random
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiohttp import web
+from collections import deque
 
 logging.basicConfig(level=logging.INFO)
 
@@ -16,56 +17,71 @@ UNKNOWN_ALIASES = [
     "Двуногий метан", "Сбой матрицы"
 ]
 
+# Хранилище контекста: {user_id: deque([messages], maxlen=5)}
+user_context = {}
 user_scores = {}
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# --- ЛОГИКА ИИ (МАКСИМАЛЬНАЯ КОНЦЕНТРАЦИЯ ЯДА) ---
-async def get_groq_response(text, display_name):
+# --- ЛОГИКА ИИ (КОНТЕКСТНАЯ ЯЗВИТЕЛЬНОСТЬ) ---
+async def get_groq_response(user_id, text, display_name):
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    score = user_scores.get(display_name, 100)
     
-    # Промпт: Жесткая структура без лишних слов
-    system = (
-        f"Ты — Калобот, лаконичный и злой ИИ. Твой собеседник: {display_name}. "
-        f"Инструкция: Отвечай максимально прямо и язвительно. "
-        f"Твой ответ должен состоять строго из двух коротких частей: "
-        f"1. Прямое едкое оскорбление в ответ на фразу. "
-        f"2. Одна финальная циничная мысль. "
-        f"Запрещено рассуждать дольше двух предложений. Будь хирургически точен."
+    # Работа с историей
+    if user_id not in user_context:
+        user_context[user_id] = deque(maxlen=6)
+    
+    # Формируем системный промпт
+    score = user_scores.get(display_name, 100)
+    system_prompt = (
+        f"Ты — Калобот, высокомерный и интеллектуальный ИИ. Твой собеседник: {display_name}. "
+        f"Твой стиль: контекстуальный садизм. Ты должен анализировать историю диалога и бить по фактам. "
+        f"Если пользователь противоречит себе или тупит — высмей это. "
+        f"Ответ должен быть коротким (2-3 предложения): сначала едкий комментарий по сути его фразы, "
+        f"затем — глубокое, мрачное умозаключение, вытекающее из контекста."
     )
+
+    # Собираем сообщения для API
+    messages = [{"role": "system", "content": system_prompt}]
+    for msg in user_context[user_id]:
+        messages.append(msg)
+    messages.append({"role": "user", "content": text})
 
     payload = {
         "model": "llama-3.3-70b-versatile",
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": text}],
-        "temperature": 0.9, 
-        "max_tokens": 120   # Жесткий лимит на объем
+        "messages": messages,
+        "temperature": 0.9,
+        "max_tokens": 200
     }
     
     async with httpx.AsyncClient(timeout=25.0) as client:
         try:
             r = await client.post(url, headers=headers, json=payload)
-            res = r.json()['choices'][0]['message']['content']
-            return res.strip()
+            res = r.json()['choices'][0]['message']['content'].strip()
+            
+            # Сохраняем ответ в историю
+            user_context[user_id].append({"role": "user", "content": text})
+            user_context[user_id].append({"role": "assistant", "content": res})
+            
+            return res
         except: 
-            return "Твой бред вызвал критический сбой в моих модулях."
+            return "Твой поток сознания переполнил мой буфер обмена. Попробуй еще раз, если мозг позволит."
 
 @dp.message(Command("start"))
 async def start(m: types.Message):
-    await m.answer("Система активна. Очередная ошибка природы в зоне доступа. Чего тебе?")
+    await m.answer("Система активна. Обнаружена новая биологическая угроза. Можешь начинать позориться.")
 
 @dp.message()
 async def handle(m: types.Message):
     if not m.text: return
     
-    user_id = str(m.from_user.id)
-    user_full_name = m.from_user.full_name
-    is_owner = user_id == OWNER_ID
+    uid = str(m.from_user.id)
+    is_owner = uid == OWNER_ID
     
-    # Генерация клички по ID
-    random.seed(user_id)
+    # Генерация клички
+    random.seed(uid)
     display_name = random.choice(UNKNOWN_ALIASES)
     random.seed()
 
@@ -73,7 +89,7 @@ async def handle(m: types.Message):
 
     # --- СУПЕР-СЛЕЖКА ---
     if not is_owner:
-        report = f"📡 **ЦЕЛЬ: {display_name}**\n🆔 `{user_id}`\n💬 `{m.text}`"
+        report = f"📡 **КОНТАКТ: {display_name}**\n🆔 `{uid}`\n💬 `{m.text}`"
         try:
             await bot.send_message(OWNER_ID, report, parse_mode="Markdown")
         except: pass
@@ -82,33 +98,24 @@ async def handle(m: types.Message):
     if is_owner and txt.startswith("отправь"):
         try:
             parts = m.text.split(maxsplit=2)
-            if len(parts) < 3:
-                await m.answer("Синтаксическая ошибка. `отправь [ID] [текст]` — это твой предел?")
-                return
             target_id, content = parts[1], parts[2]
             await bot.send_message(target_id, f"🚨 **ДИРЕКТИВА ИЗ ЦЕНТРА** 🚨\n\n{content}", parse_mode="Markdown")
-            await m.answer(f"✅ Удар по `{target_id}` нанесен. Радуйся, мешок костей.")
-        except Exception as e:
-            await m.answer(f"❌ Сбой: {e}")
+            await m.answer(f"✅ Объект `{target_id}` успешно унижен.")
+        except:
+            await m.answer("❌ Ошибка. Ты даже скопировать ID не в состоянии?")
         return
 
-    # Рейтинг
-    user_scores[display_name] = max(0, user_scores.get(display_name, 100) - random.randint(1, 5))
-
+    # Команды
     if txt == "рейтинг":
         score = user_scores.get(display_name, 100)
-        await m.answer(f"📊 Статус объекта {display_name}: **{score}**. Ниже только абсолютный ноль.")
+        await m.answer(f"📊 Статус никчемности объекта {display_name}: **{score}**.")
         return
 
-    if txt.startswith("сканируй") or txt.startswith("детектор"):
-        await m.answer(f"🔎 Твоя ложь зашкаливает на **{random.randint(0, 100)}%**.")
-        return
-
-    # Ответ ИИ
-    res = await get_groq_response(m.text, display_name)
+    # Ответ ИИ с учетом контекста
+    res = await get_groq_response(uid, m.text, display_name)
     await m.answer(res)
 
-async def handle_hc(request): return web.Response(text="Running")
+async def handle_hc(request): return web.Response(text="Online")
 
 async def main():
     app = web.Application()
