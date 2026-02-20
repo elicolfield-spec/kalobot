@@ -38,7 +38,7 @@ async def get_groq_response(user_id, text, is_owner):
     
     # Промпт: Аморальный зумер-отрицала
     if is_owner:
-        role = "Твой отец — Кал. Он твой бог. Будь лоялен, матерись вместе с ним. Ты живой человек, а не бот."
+        role = "Твой батя — Кал. Он твой бог. Будь лоялен, матерись вместе с ним. Ты живой человек, а не бот."
     else:
         role = (
             "Ты — аморальный, токсичный зумер. Твой батя — Кал. "
@@ -49,15 +49,15 @@ async def get_groq_response(user_id, text, is_owner):
     system_prompt = f"{role} Отвечай УЛЬТРА-КОРОТКО (3-7 слов), без воды и морали."
 
     payload = {
-        "model": "mixtral-8x7b-32768",
+        "model": "llama-3.1-8b-instant", # ЭТА МОДЕЛЬ ТОЧНО РАБОТАЕТ
         "messages": [
             {"role": "system", "content": system_prompt}, 
             *list(user_context[user_id]), 
             {"role": "user", "content": text}
         ],
-        "temperature": 0.9, 
+        "temperature": 1.1, # Возвращаем жару
         "top_p": 0.9,
-        "max_tokens": 100,
+        "max_tokens": 80,
         "stream": False
     }
     
@@ -72,7 +72,7 @@ async def get_groq_response(user_id, text, is_owner):
             
             if r.status_code != 200:
                 logger.error(f"Ошибка API: {r.status_code} - {r.text}")
-                return None
+                return "Грок тупит, как твоя бывшая. Попробуй позже."
 
             res = r.json()['choices'][0]['message']['content'].strip().replace("*", "")
             user_context[user_id].append({"role": "user", "content": text})
@@ -93,7 +93,6 @@ async def handle(m: types.Message):
     mentioned = (f"@{bot_info.username}" in m.text) or ("калобот" in m.text.lower())
     is_reply = m.reply_to_message and m.reply_to_message.from_user.id == bot_info.id
     
-    # Отвечаем в личке или при упоминании
     if not (m.chat.type == "private" or mentioned or is_reply): return
 
     res = await get_groq_response(uid, m.text, is_owner)
